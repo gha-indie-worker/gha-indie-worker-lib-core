@@ -1,0 +1,22 @@
+    [package]
+    name = "gha-indie-worker-lib-core"
+    version = "0.1.0"
+    edition = "2021"
+    license = "MIT"
+    description = "SeaORM boundary for GHA Indie Worker on PostgreSQL and CockroachDB"
+    repository = "https://github.com/gha-indie-worker/gha-indie-worker-lib-core"
+
+    [features]
+    default = ["read-only"]
+    read-only = []
+    read-write = ["read-only"]
+    migrate = ["read-write"]
+
+    [dependencies]
+    serde = { version = "1", features = ["derive"] }
+    thiserror = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+
