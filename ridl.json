@@ -1,0 +1,33 @@
+{
+  "maps": [
+    {
+      "path": "route-maps/worker.route-map.json",
+      "sources": [
+        "../gha-indie-worker.rs/src"
+      ]
+    },
+    {
+      "path": "route-maps/clone.route-map.json",
+      "sources": [
+        "../gha-clone-server.rs/src/main.rs",
+        "../gha-clone-server.rs/src/lib.rs"
+      ]
+    },
+    {
+      "path": "route-maps/executor-router.route-map.json",
+      "sources": [
+        "../gha-clone-server.rs/src/executor_router_service.rs",
+        "../gha-clone-server.rs/src/executor_router_service",
+        "../gha-clone-server.rs/src/executor_router.rs"
+      ]
+    }
+  ],
+  "identical_to": [
+    "../gha-indie-worker-interfaces/route-maps/worker.route-map.json",
+    "../gha-indie-worker-interfaces/route-maps/clone.route-map.json",
+    "../gha-indie-worker-interfaces/route-maps/executor-router.route-map.json"
+  ],
+  "out": "generated",
+  "skip_drift": true,
+  "allow_docs_merge": true
+}
