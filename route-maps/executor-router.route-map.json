@@ -1,0 +1,138 @@
+{
+  "schema_version": "2.0.0",
+  "service": "gha-executor-router",
+  "title": "GHA executor router",
+  "version": "0.2.0",
+  "description": "The second HTTP surface in `gha-clone-server.rs`: the `gha-executor-router` binary (src/executor_router_service.rs `router`). It places fixed-profile build jobs across reviewed AWS and Hetzner executors. NOTE: `/builds/:id` is registered with Axum 0.7 `:id` syntax; this map uses the v2 `{id}` spelling, so the source comparison reports drift until the crate moves to Axum 0.8.",
+  "types": {
+    "BuildRouteId": {
+      "kind": "scalar",
+      "base": "String",
+      "doc": "A namespaced build id, `<executor>~<upstream job id>`. The executor is pinned into the id so status reads never fan out."
+    },
+    "ExecutorRef": {
+      "kind": "record",
+      "fields": {
+        "id": "String",
+        "provider": { "type": "String", "doc": "aws | hetzner." }
+      }
+    },
+    "RouterHealth": {
+      "kind": "record",
+      "fields": {
+        "ok": "Bool",
+        "service": "String",
+        "executionEnabled": "Bool",
+        "configuredExecutors": "I64",
+        "enabledExecutors": "I64",
+        "authConfigured": "Bool",
+        "retainedAssignments": "I64",
+        "maxAssignments": "I64"
+      }
+    },
+    "RouterReady": {
+      "kind": "record",
+      "doc": "200 with an empty `readyExecutors` when execution is disabled; otherwise 200 only if at least one executor's /readyz probe succeeded, else 503.",
+      "fields": {
+        "ok": "Bool",
+        "service": "String",
+        "executionEnabled": "Bool",
+        "executionReady": "Bool",
+        "readyExecutors": { "type": { "kind": "list", "item": "ExecutorRef" } }
+      }
+    },
+    "RouterRouting": {
+      "kind": "record",
+      "doc": "Why the router never fails over after a POST: an ambiguous acceptance could duplicate work.",
+      "fields": {
+        "order": "String",
+        "preSubmissionFailover": "String",
+        "postSubmissionFailover": "Bool",
+        "reason": "String",
+        "statusPinning": "String"
+      }
+    },
+    "RouterCoordination": {
+      "kind": "record",
+      "fields": {
+        "requestIdForwardedUnchanged": "Bool",
+        "requestContentBinding": "Bool",
+        "ambiguousAssignmentRetention": "Bool",
+        "assignmentScope": "String",
+        "crossProviderResubmissionRequires": "String"
+      }
+    },
+    "RouterCapabilities": {
+      "kind": "record",
+      "fields": {
+        "service": "String",
+        "schemaVersion": { "type": "String", "doc": "\"gha-executor-router.v1\"." },
+        "executionEnabled": "Bool",
+        "executors": { "type": { "kind": "list", "item": "ExecutorRef" } },
+        "acceptedJobKind": { "type": "String", "doc": "Always \"run-profile\"." },
+        "immutableRevisionRequired": "Bool",
+        "routing": "RouterRouting",
+        "coordination": "RouterCoordination"
+      }
+    },
+    "RouterBuildRequest": {
+      "kind": "record",
+      "doc": "The only body POST /builds accepts, per `validate_build_request` in src/executor_router.rs. Any other key is rejected. It is not declared as this route's `request` because the handler takes the raw `Bytes` body: the request bytes are content-bound to the assignment for duplicate detection.",
+      "fields": {
+        "schemaVersion": { "type": "String", "doc": "Must equal \"build-server.v1\"." },
+        "jobKind": { "type": "String", "doc": "Must equal \"run-profile\"." },
+        "repoUrl": "String",
+        "gitRef": { "type": "String", "doc": "A lowercase 40-hex commit SHA." },
+        "profile": { "type": "String", "doc": "Lowercase letters, digits, and hyphens." },
+        "requestId": { "type": "String", "doc": "1-256 chars of letters, digits, '.', ':', '_', '-'. Forwarded upstream unchanged." }
+      }
+    }
+  },
+  "map": {
+    "descriptor": {
+      "path": "/",
+      "methods": ["GET"],
+      "summary": "Self-describing service document.",
+      "response": "Json"
+    },
+    "healthz": {
+      "path": "/healthz",
+      "methods": ["GET"],
+      "summary": "Liveness plus configured and enabled executor counts.",
+      "response": "RouterHealth"
+    },
+    "readyz": {
+      "path": "/readyz",
+      "methods": ["GET"],
+      "summary": "Readiness, probing every enabled executor.",
+      "response": "RouterReady"
+    },
+    "capabilities": {
+      "path": "/v1/capabilities",
+      "methods": ["GET"],
+      "summary": "Placement policy, enabled executors, and the fail-closed coordination rules.",
+      "response": "RouterCapabilities"
+    },
+    "metrics": {
+      "path": "/metrics",
+      "methods": ["GET"],
+      "summary": "Prometheus text exposition with a bounded provider label set.",
+      "client": false
+    },
+    "submit_build": {
+      "path": "/builds",
+      "methods": ["POST"],
+      "summary": "Place one fixed-profile build on an executor and relay the upstream answer.",
+      "response": "Json",
+      "doc": "The body must match `RouterBuildRequest`, but it is not declared as `request` here: the handler takes raw `Bytes` so the exact bytes can be bound to the assignment record and a replayed `requestId` with different content answers 409 instead of being placed twice. The response is the upstream build server's JSON, relayed unchanged."
+    },
+    "get_build": {
+      "path": "/builds/{id}",
+      "methods": ["GET"],
+      "summary": "Status of one placed build, read from the executor pinned in the id.",
+      "path_params": { "id": "BuildRouteId" },
+      "response": "Json",
+      "doc": "The upstream build server's job record, relayed unchanged."
+    }
+  }
+}
