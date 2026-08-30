@@ -12,6 +12,7 @@ publish = false
 [dependencies]
 sea-orm = { version = "1.1", default-features = false, features = ["runtime-tokio-rustls", "sqlx-postgres"] }
 thiserror = "2"
+url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [lints.rust]

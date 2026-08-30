@@ -13,3 +13,11 @@ exposes its SeaORM connection, and consumers cannot submit arbitrary SQL.
 Schema and migration authority remains with the product lib-core. This package
 performs only the named readiness, grant, dashboard, and idempotent action
 operations required by the isolated admin plane; it never runs migrations.
+At connection time the adapter also verifies the exact configured PostgreSQL host,
+database, and role, requires `sslmode=verify-full`, and rejects superuser,
+role-management, database-creation, replication, row-security-bypass, and DDL-capable
+credentials. Pool sizes and timeouts are deliberately bounded.
+
+Idempotent writes bind a key to the full actor/session/action payload. A changed
+payload returns a conflict instead of replaying another administrator's result. Each
+accepted action writes its durable audit outbox event in the same transaction.

@@ -4,10 +4,85 @@
 //! repository. The contexts keep the `SeaORM` connection private so callers
 //! cannot bypass the reviewed operations with ad-hoc SQL.
 
+use std::time::Duration;
+
 use sea_orm::{
-    ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement, TryGetable,
+    ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement,
+    TransactionTrait, TryGetable,
 };
+use url::Url;
 use uuid::Uuid;
+
+const MAX_CONNECTIONS: u32 = 8;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(3);
+const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Secret-bearing connection input plus the reviewed, non-secret RDS identity.
+///
+/// This type intentionally does not implement `Debug`: a database URL must
+/// never be emitted by logs, traces, panic reports, or test snapshots.
+#[derive(Clone, Copy)]
+pub struct AdminDatabaseConfig<'a> {
+    pub database_url: &'a str,
+    pub expected_host: &'a str,
+    pub expected_database: &'a str,
+    pub expected_role: &'a str,
+}
+
+impl AdminDatabaseConfig<'_> {
+    fn connect_options(&self) -> Result<ConnectOptions, AdminOrmError> {
+        self.validate()?;
+        let mut options = ConnectOptions::new(self.database_url.to_owned());
+        options
+            .max_connections(MAX_CONNECTIONS)
+            .min_connections(1)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .acquire_timeout(ACQUIRE_TIMEOUT)
+            .idle_timeout(IDLE_TIMEOUT)
+            .sqlx_logging(false);
+        Ok(options)
+    }
+
+    fn validate(&self) -> Result<(), AdminOrmError> {
+        let url =
+            Url::parse(self.database_url).map_err(|_| AdminOrmError::InvalidDatabaseTarget)?;
+        if !matches!(url.scheme(), "postgres" | "postgresql")
+            || url.host_str() != Some(self.expected_host)
+            || url.username() != self.expected_role
+            || url.fragment().is_some()
+            || !valid_identifier(self.expected_database)
+            || !valid_identifier(self.expected_role)
+        {
+            return Err(AdminOrmError::InvalidDatabaseTarget);
+        }
+        let database = url
+            .path()
+            .strip_prefix('/')
+            .filter(|value| !value.is_empty() && !value.contains('/'))
+            .ok_or(AdminOrmError::InvalidDatabaseTarget)?;
+        if database != self.expected_database {
+            return Err(AdminOrmError::InvalidDatabaseTarget);
+        }
+        let ssl_modes = url
+            .query_pairs()
+            .filter(|(name, _)| name == "sslmode")
+            .map(|(_, value)| value)
+            .collect::<Vec<_>>();
+        if ssl_modes.len() != 1 || ssl_modes[0] != "verify-full" {
+            return Err(AdminOrmError::InvalidDatabaseTarget);
+        }
+        Ok(())
+    }
+}
+
+fn valid_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 63
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AdminPermission {
@@ -35,7 +110,7 @@ pub struct AdminDashboardStats {
 pub struct AdminAction<'a> {
     pub idempotency_key: &'a str,
     pub actor_subject: &'a str,
-    pub actor_session_id: Option<&'a str>,
+    pub actor_session_id: &'a str,
     pub resource: &'a str,
     pub action: &'a str,
     pub reason: &'a str,
@@ -49,6 +124,12 @@ pub enum AdminOrmError {
     Decode,
     #[error("admin database returned an invalid operation identifier")]
     InvalidOperationId,
+    #[error("admin database target does not match the reviewed RDS identity")]
+    InvalidDatabaseTarget,
+    #[error("admin database runtime role has unsafe privileges")]
+    UnsafeRuntimeRole,
+    #[error("idempotency key was already used for a different admin action")]
+    IdempotencyConflict,
     #[error("admin web credential is not database-enforced read-only")]
     ReadCredentialWritable,
     #[error("admin API credential cannot write to the admin database")]
@@ -67,10 +148,11 @@ impl AdminReadContext {
     ///
     /// Returns an error when the connection fails, the mode cannot be decoded,
     /// or the supplied credential can write.
-    pub async fn connect(database_url: &str) -> Result<Self, AdminOrmError> {
-        let connection = Database::connect(database_url)
+    pub async fn connect(config: AdminDatabaseConfig<'_>) -> Result<Self, AdminOrmError> {
+        let connection = Database::connect(config.connect_options()?)
             .await
             .map_err(AdminOrmError::Database)?;
+        validate_runtime_role(&connection, &config).await?;
         if transaction_read_only(&connection).await? {
             Ok(Self { connection })
         } else {
@@ -143,10 +225,11 @@ impl AdminWriteContext {
     ///
     /// Returns an error when the connection fails, the mode cannot be decoded,
     /// or the supplied credential is read-only.
-    pub async fn connect(database_url: &str) -> Result<Self, AdminOrmError> {
-        let connection = Database::connect(database_url)
+    pub async fn connect(config: AdminDatabaseConfig<'_>) -> Result<Self, AdminOrmError> {
+        let connection = Database::connect(config.connect_options()?)
             .await
             .map_err(AdminOrmError::Database)?;
+        validate_runtime_role(&connection, &config).await?;
         if transaction_read_only(&connection).await? {
             Err(AdminOrmError::WriteCredentialReadOnly)
         } else {
@@ -183,8 +266,12 @@ impl AdminWriteContext {
     /// Returns an error when the write fails or the operation id is invalid.
     pub async fn record_action(&self, input: &AdminAction<'_>) -> Result<Uuid, AdminOrmError> {
         let operation_id = Uuid::new_v4();
-        let row = self
+        let transaction = self
             .connection
+            .begin()
+            .await
+            .map_err(AdminOrmError::Database)?;
+        let inserted = transaction
             .query_one(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 r"
@@ -197,8 +284,7 @@ impl AdminWriteContext {
                         action,
                         reason
                     ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT (idempotency_key) DO UPDATE
-                    SET idempotency_key = EXCLUDED.idempotency_key
+                    ON CONFLICT (idempotency_key) DO NOTHING
                     RETURNING operation_id::text AS operation_id
                 ",
                 [
@@ -212,11 +298,68 @@ impl AdminWriteContext {
                 ],
             ))
             .await
-            .map_err(AdminOrmError::Database)?
-            .ok_or(AdminOrmError::InvalidOperationId)?;
-        let value = String::try_get(&row, "", "operation_id").map_err(|_| AdminOrmError::Decode)?;
-        Uuid::parse_str(&value).map_err(|_| AdminOrmError::InvalidOperationId)
+            .map_err(AdminOrmError::Database)?;
+        let (operation_id, was_inserted) = if let Some(row) = inserted {
+            (operation_id_from_row(&row)?, true)
+        } else {
+            let existing = transaction
+                .query_one(Statement::from_sql_and_values(
+                    DatabaseBackend::Postgres,
+                    r"
+                            SELECT operation_id::text AS operation_id
+                            FROM admin_action_requests
+                            WHERE idempotency_key = $1
+                              AND actor_subject = $2
+                              AND actor_session_id = $3
+                              AND resource = $4
+                              AND action = $5
+                              AND reason = $6
+                        ",
+                    [
+                        input.idempotency_key.into(),
+                        input.actor_subject.into(),
+                        input.actor_session_id.into(),
+                        input.resource.into(),
+                        input.action.into(),
+                        input.reason.into(),
+                    ],
+                ))
+                .await
+                .map_err(AdminOrmError::Database)?;
+            if let Some(row) = existing {
+                (operation_id_from_row(&row)?, false)
+            } else {
+                transaction
+                    .rollback()
+                    .await
+                    .map_err(AdminOrmError::Database)?;
+                return Err(AdminOrmError::IdempotencyConflict);
+            }
+        };
+        if was_inserted {
+            transaction
+                .execute(Statement::from_sql_and_values(
+                    DatabaseBackend::Postgres,
+                    r"
+                        INSERT INTO admin_action_outbox (operation_id, event_kind)
+                        VALUES ($1::uuid, 'admin.action.requested')
+                    ",
+                    [operation_id.to_string().into()],
+                ))
+                .await
+                .map_err(AdminOrmError::Database)?;
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(AdminOrmError::Database)?;
+        Ok(operation_id)
     }
+}
+
+fn operation_id_from_row(row: &sea_orm::QueryResult) -> Result<Uuid, AdminOrmError> {
+    let value = String::try_get(row, "", "operation_id").map_err(|_| AdminOrmError::Decode)?;
+    Uuid::parse_str(&value).map_err(|_| AdminOrmError::InvalidOperationId)
 }
 
 async fn ready(connection: &DatabaseConnection) -> Result<(), AdminOrmError> {
@@ -227,6 +370,64 @@ async fn ready(connection: &DatabaseConnection) -> Result<(), AdminOrmError> {
         ))
         .await
         .map_err(AdminOrmError::Database)?;
+    Ok(())
+}
+
+async fn validate_runtime_role(
+    connection: &DatabaseConnection,
+    config: &AdminDatabaseConfig<'_>,
+) -> Result<(), AdminOrmError> {
+    let row = connection
+        .query_one(Statement::from_string(
+            DatabaseBackend::Postgres,
+            r"
+                SELECT
+                    current_user::text AS role_name,
+                    current_database()::text AS database_name,
+                    role.rolsuper,
+                    role.rolcreaterole,
+                    role.rolcreatedb,
+                    role.rolreplication,
+                    role.rolbypassrls,
+                    has_database_privilege(current_user, current_database(), 'CREATE')
+                        AS can_create_schemas,
+                    EXISTS (
+                        SELECT 1
+                        FROM information_schema.schemata AS schema
+                        WHERE schema.schema_name <> 'information_schema'
+                          AND schema.schema_name NOT LIKE 'pg_%'
+                          AND has_schema_privilege(current_user, schema.schema_name, 'CREATE')
+                    ) AS can_create_schema_objects
+                FROM pg_roles AS role
+                WHERE role.rolname = current_user
+            "
+            .to_owned(),
+        ))
+        .await
+        .map_err(AdminOrmError::Database)?
+        .ok_or(AdminOrmError::UnsafeRuntimeRole)?;
+    let role_name = String::try_get(&row, "", "role_name").map_err(|_| AdminOrmError::Decode)?;
+    let database_name =
+        String::try_get(&row, "", "database_name").map_err(|_| AdminOrmError::Decode)?;
+    let unsafe_role = [
+        "rolsuper",
+        "rolcreaterole",
+        "rolcreatedb",
+        "rolreplication",
+        "rolbypassrls",
+        "can_create_schemas",
+        "can_create_schema_objects",
+    ]
+    .into_iter()
+    .try_fold(false, |unsafe_role, column| {
+        bool::try_get(&row, "", column)
+            .map(|value| unsafe_role || value)
+            .map_err(|_| AdminOrmError::Decode)
+    })?;
+    if role_name != config.expected_role || database_name != config.expected_database || unsafe_role
+    {
+        return Err(AdminOrmError::UnsafeRuntimeRole);
+    }
     Ok(())
 }
 
@@ -277,11 +478,39 @@ async fn has_permission(
 
 #[cfg(test)]
 mod tests {
-    use super::AdminPermission;
+    use super::{AdminDatabaseConfig, AdminPermission};
 
     #[test]
     fn permissions_have_stable_database_values() {
         assert_eq!(AdminPermission::Read.as_str(), "admin:read");
         assert_eq!(AdminPermission::Write.as_str(), "admin:write");
+    }
+
+    #[test]
+    fn database_target_requires_exact_identity_and_verified_tls() {
+        let valid = AdminDatabaseConfig {
+            database_url: "postgresql://admin_api_runtime:secret@admin-db.example/admin_control?sslmode=verify-full",
+            expected_host: "admin-db.example",
+            expected_database: "admin_control",
+            expected_role: "admin_api_runtime",
+        };
+        assert!(valid.validate().is_ok());
+        assert!(
+            AdminDatabaseConfig {
+                database_url: "postgresql://admin_api_runtime:secret@customer-db.example/admin_control?sslmode=verify-full",
+                ..valid
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            AdminDatabaseConfig {
+                database_url:
+                    "postgresql://admin_api_runtime:secret@admin-db.example/admin_control?sslmode=require",
+                ..valid
+            }
+            .validate()
+            .is_err()
+        );
     }
 }
