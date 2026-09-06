@@ -1,0 +1,25 @@
+{
+  "name": "@gha-indie-worker/lib-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript/ESM sibling of gha-indie-worker-lib-core: contract validation, the onboarding state machines and the frame codec.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./validate": "./src/validate.mjs",
+    "./onboarding": "./src/onboarding.mjs",
+    "./frames": "./src/frames.mjs"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "lint": "eslint --config ../.ores-lint/eslint.config.mjs src test"
+  }
+}

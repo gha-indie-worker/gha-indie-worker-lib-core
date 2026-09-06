@@ -1,4 +1,5 @@
     [package]
+    rust-version = "1.88"
     name = "gha-indie-worker-lib-core"
     version = "0.1.0"
     edition = "2021"
@@ -7,14 +8,19 @@
     repository = "https://github.com/gha-indie-worker/gha-indie-worker-lib-core"
 
     [features]
-    default = ["read-only"]
+    default = ["read-only", "embedded-schemas"]
     read-only = []
     read-write = ["read-only"]
     migrate = ["read-write"]
+embedded-schemas = ["dep:gha-indie-worker-interfaces"]
+db = ["dep:sea-orm"]
 
     [dependencies]
     serde = { version = "1", features = ["derive"] }
     thiserror = "2"
+serde_json = "1"
+gha-indie-worker-interfaces = { git = "https://github.com/gha-indie-worker/gha-indie-worker-interfaces", branch = "main", optional = true }
+sea-orm = { version = "2.0.0", default-features = false, features = ["macros", "runtime-tokio-rustls", "sqlx-postgres", "with-json", "with-uuid", "with-time"], optional = true }
 
 [lints.rust]
 unsafe_code = "forbid"

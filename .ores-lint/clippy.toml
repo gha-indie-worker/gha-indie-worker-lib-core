@@ -1,0 +1,8 @@
+# Canonical copy: .ores-lint/clippy.toml. Kept in sync by .ores-lint/lint.sh.
+#
+# The contract-shaped structs are wide by design and the validator's recursive
+# walk takes the schema, the instance, the root, a pointer and a sink, so the
+# argument threshold is raised rather than fought with wrapper structs that would
+# only obscure the recursion.
+too-many-arguments-threshold = 10
+type-complexity-threshold = 500

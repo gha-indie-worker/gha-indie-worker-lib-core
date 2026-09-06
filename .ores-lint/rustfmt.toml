@@ -1,0 +1,5 @@
+# Canonical copy: .ores-lint/rustfmt.toml (cargo fmt only reads a rustfmt.toml at
+# the crate root or an ancestor, so the file is mirrored here and .ores-lint/lint.sh
+# asserts the two are byte-identical).
+edition = "2021"
+newline_style = "Unix"

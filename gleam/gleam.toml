@@ -1,0 +1,11 @@
+name = "gha_indie_worker_lib_core"
+version = "0.1.0"
+licences = ["MIT"]
+description = "Gleam sibling of gha-indie-worker-lib-core: the onboarding state machines."
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.2.0 and < 2.0.0"
