@@ -11,4 +11,3 @@ pub enum CoreError {
     #[error("read-only connections cannot migrate")]
     WritesDisabled,
 }
-
