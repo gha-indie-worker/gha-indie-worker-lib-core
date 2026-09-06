@@ -8,4 +8,3 @@ pub enum DatabaseFlavor {
     PostgreSql,
     CockroachDb,
 }
-
