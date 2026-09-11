@@ -1,0 +1,23 @@
+[package]
+name = "gha-indie-worker-lib-core-admin-orm"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Product-owned admin ORM operations from gha-indie-worker-lib-core"
+license = "UNLICENSED"
+publish = false
+
+[workspace]
+
+[dependencies]
+sea-orm = { version = "1.1", default-features = false, features = ["runtime-tokio-rustls", "sqlx-postgres"] }
+thiserror = "2"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "deny"
+pedantic = "warn"
