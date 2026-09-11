@@ -1,0 +1,240 @@
+{
+  "schema_version": "2.0.0",
+  "service": "gha-indie-worker",
+  "title": "GHA Indie Worker build server",
+  "version": "0.1.0",
+  "description": "The HTTP surface of `gha-indie-worker.rs` (src/http.rs `build_router`), transcribed from the code as it stands. Wire names are camelCase because every payload struct carries `#[serde(rename_all = \"camelCase\")]`. Routes that answer with HTML, Prometheus text, a log stream, or a gzip artifact carry `client: false`: they belong in the map so the gate holds them to the source, but there is no typed JSON call to generate. NOTE: the server registers path parameters with Axum 0.7 `:job_id` syntax; this map uses the v2 `{job_id}` spelling, so the source comparison reports drift until the crate moves to Axum 0.8.",
+  "types": {
+    "BuildJobId": {
+      "kind": "scalar",
+      "base": "String",
+      "doc": "Server-minted build job id. A bare string on the wire, distinct here so a client cannot pass an arbitrary path segment."
+    },
+    "BuildStatus": {
+      "kind": "enum",
+      "variants": ["queued", "running", "succeeded", "failed"],
+      "doc": "`BuildStatus` in src/types.rs. Single-word camelCase variants are lowercase on the wire."
+    },
+    "DeployRequest": {
+      "kind": "record",
+      "doc": "Optional controlled Kubernetes deploy attached to a build.",
+      "fields": {
+        "kind": { "type": "String", "doc": "kustomize | manifest | none." },
+        "path": "String",
+        "namespace": { "type": "String", "required": false },
+        "rollout": { "type": "String", "required": false },
+        "rolloutTimeoutSeconds": { "type": "I64", "required": false }
+      }
+    },
+    "BuildRequest": {
+      "kind": "record",
+      "doc": "`BuildRequest` in src/types.rs. Only `repoUrl` is unconditionally required by the type; `image` and `profile` are required per `jobKind` by src/validation.rs, which the type system cannot express.",
+      "fields": {
+        "schemaVersion": { "type": "String", "required": false, "doc": "\"build-server.v1\" when sent." },
+        "jobKind": { "type": "String", "required": false, "doc": "build-image | build-and-deploy | run-profile." },
+        "repoUrl": "String",
+        "gitRef": { "type": "String", "required": false },
+        "image": { "type": "String", "default": "", "doc": "`#[serde(default)]`: absent means the empty string, which validation rejects for image builds." },
+        "profile": { "type": "String", "required": false, "doc": "Operator-reviewed fixed command pipeline, for jobKind=run-profile." },
+        "contextDir": { "type": "String", "required": false },
+        "dockerfile": { "type": "String", "required": false },
+        "buildArgs": { "type": { "kind": "map", "value": "String" }, "required": false },
+        "push": { "type": "Bool", "required": false },
+        "deploy": { "type": "DeployRequest", "required": false },
+        "executor": { "type": "String", "required": false, "doc": "\"local\" (default) or \"lambda\"." },
+        "requestId": { "type": "String", "required": false, "doc": "Caller-supplied idempotency id for at-least-once transports; duplicate ids are accepted and ignored." }
+      }
+    },
+    "BuildJobRecord": {
+      "kind": "record",
+      "doc": "`BuildJobRecord` in src/types.rs: the accepted job as the server echoes it back.",
+      "fields": {
+        "id": "BuildJobId",
+        "status": "BuildStatus",
+        "request": "BuildRequest",
+        "source": { "type": "String", "doc": "http | webhook | nats." },
+        "executor": { "type": "String", "doc": "local | lambda." },
+        "createdAtMs": { "type": "I64", "doc": "Milliseconds since the epoch. `u128` in Rust; no payload has ever exceeded i64." },
+        "startedAtMs": { "type": "I64", "required": false },
+        "finishedAtMs": { "type": "I64", "required": false },
+        "logPath": "String",
+        "error": { "type": "String", "required": false },
+        "lockKey": { "type": "String", "required": false, "doc": "fiducia.cloud lock key, when coordination is enabled." },
+        "fencingToken": { "type": "I64", "required": false }
+      }
+    },
+    "HealthResponse": {
+      "kind": "record",
+      "doc": "`HealthResponse` in src/types.rs.",
+      "fields": {
+        "ok": "Bool",
+        "service": "String",
+        "authConfigured": "Bool",
+        "deployEnabled": "Bool",
+        "pushEnabled": "Bool",
+        "ecrLoginEnabled": "Bool",
+        "allowedRepoPrefixes": { "type": { "kind": "list", "item": "String" } },
+        "allowedImagePrefixes": { "type": { "kind": "list", "item": "String" } },
+        "allowedNamespaces": { "type": { "kind": "list", "item": "String" } },
+        "allowedProfiles": { "type": { "kind": "list", "item": "String" } },
+        "allowedProfileRepoPrefixes": { "type": { "kind": "list", "item": "String" } },
+        "queued": "I64",
+        "running": "I64"
+      }
+    },
+    "ReadyResponse": {
+      "kind": "record",
+      "doc": "Answered with 200 when ready and 503 when not; the body is the same either way.",
+      "fields": {
+        "ok": "Bool",
+        "service": "String",
+        "dependenciesReady": "Bool"
+      }
+    },
+    "SyncOutcome": {
+      "kind": "record",
+      "doc": "`SyncOutcome` in src/gh_secrets.rs. Carries no secret value, only its fate.",
+      "fields": {
+        "repo": "String",
+        "secret": "String",
+        "status": "String",
+        "detail": { "type": "String", "required": false }
+      }
+    },
+    "SyncSecretsResponse": {
+      "kind": "record",
+      "fields": { "outcomes": { "type": { "kind": "list", "item": "SyncOutcome" } } }
+    },
+    "SecretSyncRun": {
+      "kind": "record",
+      "doc": "One row of `gh_secret_sync_runs`. This entity has no `rename_all`, so its wire names are snake_case while the rest of this service is camelCase.",
+      "fields": {
+        "id": "I64",
+        "repo": "String",
+        "secret_name": "String",
+        "value_sha256": "String",
+        "status": "String",
+        "detail": { "type": "String", "required": false },
+        "synced_at": "DateTime"
+      }
+    },
+    "SyncSecretsStatusResponse": {
+      "kind": "record",
+      "fields": { "runs": { "type": { "kind": "list", "item": "SecretSyncRun" } } }
+    }
+  },
+  "map": {
+    "descriptor": {
+      "path": "/",
+      "methods": ["GET"],
+      "summary": "Self-describing service document: endpoints, job schema, profiles, and which optional subsystems are configured.",
+      "response": "Json",
+      "doc": "Built inline with `json!` from live configuration, so the shape is deliberately open."
+    },
+    "healthz": {
+      "path": "/healthz",
+      "methods": ["GET"],
+      "summary": "Liveness plus the effective allowlists and queue depth.",
+      "response": "HealthResponse"
+    },
+    "readyz": {
+      "path": "/readyz",
+      "methods": ["GET"],
+      "summary": "Readiness: auth, work storage, and the required build tools.",
+      "response": "ReadyResponse"
+    },
+    "docs_api_html": {
+      "path": "/docs/api",
+      "methods": ["GET"],
+      "summary": "Pre-rendered API documentation page.",
+      "client": false
+    },
+    "api_docs_html": {
+      "path": "/api/docs",
+      "methods": ["GET"],
+      "summary": "Alias of /docs/api, same handler.",
+      "client": false
+    },
+    "api_docs_json": {
+      "path": "/api/docs.json",
+      "methods": ["GET"],
+      "summary": "The generated API document, served verbatim from generated/api-docs.json.",
+      "response": "Json"
+    },
+    "metrics": {
+      "path": "/metrics",
+      "methods": ["GET"],
+      "summary": "Prometheus text exposition.",
+      "client": false
+    },
+    "list_builds": {
+      "path": "/builds",
+      "methods": ["GET"],
+      "summary": "Recent build jobs, newest first.",
+      "response": { "kind": "list", "item": "Json" },
+      "doc": "Deliberately untyped: with Postgres configured the handler appends persisted rows in a different shape from the live `BuildJobRecord` entries (see the report accompanying this map). Without Postgres every element is a BuildJobRecord."
+    },
+    "submit_build": {
+      "path": "/builds",
+      "methods": ["POST"],
+      "summary": "Queue a build job. Answers 202 with the accepted record.",
+      "request": "BuildRequest",
+      "response": "BuildJobRecord",
+      "delivery": "opto_sync_queued",
+      "opto_sync": {
+        "table": "gha_indie_worker_build_jobs",
+        "record_id_from": "request.requestId",
+        "operation": "upsert"
+      },
+      "doc": "Queued through opto-sync because the server already treats submission as at-least-once: `requestId` is the caller-supplied idempotency key and duplicate ids are accepted and ignored."
+    },
+    "get_build": {
+      "path": "/builds/{job_id}",
+      "methods": ["GET"],
+      "summary": "One build job's current record.",
+      "path_params": { "job_id": "BuildJobId" },
+      "response": "BuildJobRecord"
+    },
+    "get_build_logs": {
+      "path": "/builds/{job_id}/logs",
+      "methods": ["GET"],
+      "summary": "The job's log file as text/plain.",
+      "path_params": { "job_id": "BuildJobId" },
+      "client": false
+    },
+    "get_build_artifacts": {
+      "path": "/builds/{job_id}/artifacts",
+      "methods": ["GET"],
+      "summary": "The job's artifacts.tar.gz as an attachment stream.",
+      "path_params": { "job_id": "BuildJobId" },
+      "client": false
+    },
+    "github_webhook": {
+      "path": "/webhooks/github",
+      "methods": ["POST"],
+      "summary": "GitHub push and workflow_run deliveries.",
+      "client": false,
+      "doc": "The handler takes the raw `Bytes` body so the HMAC in X-Hub-Signature-256 is verified over exactly what arrived; there is no typed request body to model, and the response shape varies by branch (ping, duplicate, accepted, rejected)."
+    },
+    "registry_webhook": {
+      "path": "/webhooks/registry",
+      "methods": ["POST"],
+      "summary": "Container-registry image events, relayed onto NATS.",
+      "client": false,
+      "doc": "Raw `Bytes` body plus a shared-secret header and a required X-Delivery-Id; same reasoning as the GitHub webhook."
+    },
+    "sync_secrets": {
+      "path": "/secrets/sync",
+      "methods": ["POST"],
+      "summary": "Run one GitHub Actions secret sync pass.",
+      "response": "SyncSecretsResponse",
+      "doc": "Takes no request body: the rules come from server configuration. The POST is the trigger."
+    },
+    "sync_secrets_status": {
+      "path": "/secrets/sync/status",
+      "methods": ["GET"],
+      "summary": "The last 100 secret sync runs, newest first. Empty when Postgres is not configured.",
+      "response": "SyncSecretsStatusResponse"
+    }
+  }
+}

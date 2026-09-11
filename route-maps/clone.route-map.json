@@ -1,0 +1,202 @@
+{
+  "schema_version": "2.0.0",
+  "service": "gha-clone-server",
+  "title": "GHA clone server (planner and run coordinator)",
+  "version": "0.1.0",
+  "description": "The HTTP surface of `gha-clone-server.rs` src/main.rs `router`, with the payload types from src/lib.rs. Wire names are camelCase (`#[serde(rename_all = \"camelCase\")]` on every payload). NOTE: `/v1/runs/:id` is registered with Axum 0.7 `:id` syntax; this map uses the v2 `{id}` spelling, so the source comparison reports drift until the crate moves to Axum 0.8.",
+  "types": {
+    "RunId": {
+      "kind": "scalar",
+      "base": "Uuid",
+      "doc": "Identifies one independent workflow run. `Uuid::new_v4()` server-side."
+    },
+    "RunStatus": {
+      "kind": "enum",
+      "variants": ["queued", "running", "succeeded", "failed"]
+    },
+    "PlanRequest": {
+      "kind": "record",
+      "doc": "`PlanRequest` in src/lib.rs. POST /v1/runs takes the same fields flat, because `RunRequest` is `#[serde(flatten)] plan: PlanRequest`.",
+      "fields": {
+        "repository": { "type": "String", "doc": "owner/name; must be in GHA_CLONE_ALLOWED_REPOSITORIES." },
+        "revision": { "type": "String", "doc": "A 40-hex commit SHA for an immutable plan." },
+        "workflowPath": { "type": "String", "default": ".github/workflows/ci.yml" },
+        "workflowYaml": "String"
+      }
+    },
+    "JobPlan": {
+      "kind": "record",
+      "doc": "`JobPlan` in src/lib.rs. `independentProfile` is `skip_serializing_if = \"Option::is_none\"`, so it is absent rather than null.",
+      "fields": {
+        "id": "String",
+        "needs": { "type": { "kind": "list", "item": "String" } },
+        "runsOn": { "type": { "kind": "list", "item": "String" } },
+        "arcCompatible": "Bool",
+        "arcLane": "String",
+        "independentSupported": "Bool",
+        "independentProfile": { "type": "String", "required": false },
+        "independentReasons": { "type": { "kind": "list", "item": "String" } },
+        "independentNotes": { "type": { "kind": "list", "item": "String" } }
+      }
+    },
+    "WorkflowPlan": {
+      "kind": "record",
+      "doc": "`WorkflowPlan` in src/lib.rs: the fail-closed compilation of one workflow file.",
+      "fields": {
+        "schemaVersion": { "type": "String", "doc": "\"gha-clone-plan.v1\"." },
+        "planId": "String",
+        "repository": "String",
+        "revision": "String",
+        "workflowPath": "String",
+        "immutableRevision": "Bool",
+        "arcFullyCovered": "Bool",
+        "independentExecutable": "Bool",
+        "topologicalOrder": { "type": { "kind": "list", "item": "String" } },
+        "jobs": { "type": { "kind": "list", "item": "JobPlan" } },
+        "warnings": { "type": { "kind": "list", "item": "String" } }
+      }
+    },
+    "BuildSubmission": {
+      "kind": "record",
+      "doc": "One job handed to the build server during a run.",
+      "fields": {
+        "jobId": "String",
+        "profile": "String",
+        "buildJobId": "String",
+        "status": "String"
+      }
+    },
+    "RunRecord": {
+      "kind": "record",
+      "doc": "`RunRecord` in src/main.rs: an in-process run, retained up to GHA_CLONE_MAX_RUNS.",
+      "fields": {
+        "id": "RunId",
+        "planId": "String",
+        "repository": "String",
+        "revision": "String",
+        "workflowPath": "String",
+        "status": "RunStatus",
+        "currentJob": { "type": "String", "required": false },
+        "submissions": { "type": { "kind": "list", "item": "BuildSubmission" } },
+        "error": { "type": "String", "required": false },
+        "createdAtMs": "I64",
+        "updatedAtMs": "I64"
+      }
+    },
+    "CapabilityLimits": {
+      "kind": "record",
+      "fields": {
+        "maxWorkflowBytes": "I64",
+        "maxJobs": "I64",
+        "maxStepsPerJob": "I64"
+      }
+    },
+    "ArchitectureCapabilities": {
+      "kind": "record",
+      "fields": {
+        "nativeParityLane": "String",
+        "independentLane": "String",
+        "nativeArcLabels": { "type": { "kind": "list", "item": "String" } }
+      }
+    },
+    "CapabilityResponse": {
+      "kind": "record",
+      "doc": "`CapabilityResponse` in src/lib.rs: what the independent lane will and will not compile.",
+      "fields": {
+        "service": "String",
+        "planSchemaVersion": "String",
+        "architecture": "ArchitectureCapabilities",
+        "independentProfiles": { "type": { "kind": "list", "item": "String" } },
+        "limits": "CapabilityLimits",
+        "explicitlyUnsupported": { "type": { "kind": "list", "item": "String" } }
+      }
+    },
+    "HealthResponse": {
+      "kind": "record",
+      "doc": "Built inline with `json!` in src/main.rs `healthz`.",
+      "fields": {
+        "ok": "Bool",
+        "service": "String",
+        "executionEnabled": "Bool",
+        "webhookExecutionEnabled": "Bool",
+        "authConfigured": "Bool",
+        "webhookConfigured": "Bool",
+        "githubApiConfigured": "Bool",
+        "buildServerConfigured": "Bool",
+        "allowedRepositories": "I64",
+        "workflowRules": "I64",
+        "runsRetained": "I64",
+        "webhookDeliveriesRetained": "I64",
+        "webhookFailureConclusions": { "type": { "kind": "list", "item": "String" } },
+        "webhookIgnoredWorkflows": { "type": { "kind": "list", "item": "String" } },
+        "webhookDeliveryTtlSeconds": "I64",
+        "maxWebhookDeliveries": "I64"
+      }
+    },
+    "ReadyResponse": {
+      "kind": "record",
+      "doc": "200 when ready, 503 when not; same body either way.",
+      "fields": {
+        "ok": "Bool",
+        "service": "String",
+        "executionReady": "Bool",
+        "webhookExecutionReady": "Bool"
+      }
+    }
+  },
+  "map": {
+    "descriptor": {
+      "path": "/",
+      "methods": ["GET"],
+      "summary": "Self-describing service document.",
+      "response": "Json"
+    },
+    "healthz": {
+      "path": "/healthz",
+      "methods": ["GET"],
+      "summary": "Liveness plus which subsystems are configured and how much state is retained.",
+      "response": "HealthResponse"
+    },
+    "readyz": {
+      "path": "/readyz",
+      "methods": ["GET"],
+      "summary": "Readiness of the independent execution and webhook execution lanes.",
+      "response": "ReadyResponse"
+    },
+    "capabilities": {
+      "path": "/v1/capabilities",
+      "methods": ["GET"],
+      "summary": "The bounded workflow subset this server will compile, and the limits it enforces.",
+      "response": "CapabilityResponse"
+    },
+    "create_plan": {
+      "path": "/v1/plans",
+      "methods": ["POST"],
+      "summary": "Compile one workflow file into a plan. Answers 422 with the rejection reasons when the workflow leaves the supported subset.",
+      "request": "PlanRequest",
+      "response": "WorkflowPlan"
+    },
+    "create_run": {
+      "path": "/v1/runs",
+      "methods": ["POST"],
+      "summary": "Compile and then execute a plan. Answers 202 with the queued run record.",
+      "request": "PlanRequest",
+      "response": "RunRecord",
+      "doc": "Not queued through opto-sync: each call mints a fresh run id, so a replayed request would start a second run."
+    },
+    "get_run": {
+      "path": "/v1/runs/{id}",
+      "methods": ["GET"],
+      "summary": "One run's current record.",
+      "path_params": { "id": "RunId" },
+      "response": "RunRecord"
+    },
+    "github_webhook": {
+      "path": "/webhooks/github",
+      "methods": ["POST"],
+      "summary": "GitHub workflow_run deliveries that may trigger an independent rerun.",
+      "client": false,
+      "doc": "The handler takes the raw `Bytes` body so the HMAC in X-Hub-Signature-256 is verified over exactly what arrived; there is no typed request body to model."
+    }
+  }
+}
