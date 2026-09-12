@@ -1,0 +1,28 @@
+{
+  "schema": "ores.contract-ir-consumer/v1",
+  "linearIssue": "DEN-3982",
+  "architectureIssue": "ORESoftware/typespec-json-schema-validator#20",
+  "repository": "gha-indie-worker/gha-indie-worker-lib-core",
+  "repositoryRole": "lib-core",
+  "canonicalAuthorityRepository": "gha-indie-worker/gha-indie-worker-interfaces",
+  "evidenceScope": "repository-local-canary-only",
+  "validator": {
+    "repository": "ORESoftware/typespec-json-schema-validator",
+    "actionCommit": "c745036456dd80408b83217118b8563edb8f6abd",
+    "contractIrSchema": "ores.typespec-json-schema-validator.contract-ir/v1"
+  },
+  "authorityModel": {
+    "typespec": "independently-authored-peer-authority",
+    "jsonSchema": "independently-authored-peer-authority",
+    "generatedJsonSchema": "comparison-evidence-only",
+    "precedence": "none"
+  },
+  "admission": {
+    "requirePassedReceipt": true,
+    "requireAdmissibleContractIr": true,
+    "requireZeroUnexplainedFindings": true,
+    "rejectEditableAuthority": true,
+    "allowFallbackAuthority": false
+  },
+  "downstreamResponsibilities": ["consume-admitted-contract-ir","project-shared-domain-types","retain-ir-and-generator-digests","block-promotion-on-stale-evidence"]
+}
