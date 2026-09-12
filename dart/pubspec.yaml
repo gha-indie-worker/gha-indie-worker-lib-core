@@ -1,0 +1,14 @@
+name: gha_indie_worker_lib_core
+description: >-
+  Dart sibling of gha-indie-worker-lib-core: the onboarding state machines and
+  the contract validation subset, for the Flutter clients.
+version: 0.1.0
+publish_to: none
+repository: https://github.com/gha-indie-worker/gha-indie-worker-lib-core
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

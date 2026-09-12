@@ -1,0 +1,13 @@
+{
+  // ores fleet markdown rules. Run: npx markdownlint-cli2 --config .ores-lint/.markdownlint.jsonc "**/*.md"
+  "default": true,
+  // Tables and contract snippets routinely exceed 80 columns; prose is wrapped by hand.
+  "MD013": false,
+  // Duplicate headings are fine across sibling sections (e.g. "Fixtures" per slice).
+  "MD024": { "siblings_only": true },
+  // Bare URLs appear inside generated receipts and config comments.
+  "MD034": false,
+  // The first line of README.md is the repo name, not always an H1.
+  "MD041": false,
+  "MD046": { "style": "fenced" }
+}

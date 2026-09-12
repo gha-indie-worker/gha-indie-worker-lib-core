@@ -1,0 +1,121 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Lint configs are mirrored
+        run: |
+          diff -q .ores-lint/rustfmt.toml rustfmt.toml
+          diff -q .ores-lint/clippy.toml clippy.toml
+      - name: Format
+        run: cargo fmt --all -- --check
+      # The crate must stay client-safe with no features, and must still build
+      # with the database layer on. Both are gates, not conveniences.
+      - name: Lint (no default features)
+        run: cargo clippy --all-targets --no-default-features --features read-only -- -D warnings
+      - name: Lint (default)
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Lint (db)
+        run: cargo clippy --all-targets --features db -- -D warnings
+      - name: Test (no default features)
+        run: cargo test --all-targets --no-default-features --features read-only
+      - name: Test (default)
+        run: cargo test --all-targets
+      - name: Test (db)
+        run: cargo test --all-targets --features db
+      - name: Documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps
+
+  admin-orm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: The admin ORM boundary is its own workspace
+        working-directory: admin-orm
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test --all-targets
+
+  contract-agreement:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          path: gha-indie-worker-lib-core
+      # The fixture corpus lives in the interfaces repository. Checking it out
+      # here is what lets the Rust validator be compared against the JSON Schema
+      # validators over the same 65 documents.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          repository: gha-indie-worker/gha-indie-worker-interfaces
+          path: gha-indie-worker-interfaces
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: gha-indie-worker-lib-core
+      - name: The Rust validator agrees with the contract corpus
+        working-directory: gha-indie-worker-lib-core
+        env:
+          GHA_INDIE_WORKER_INTERFACES_DIR: ${{ github.workspace }}/gha-indie-worker-interfaces
+        run: cargo test --test fixture_agreement -- --nocapture
+
+  node:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: TypeScript sibling
+        working-directory: typescript
+        run: node --test test/*.test.mjs
+
+  # A `dart` job is deliberately absent. The org's workflow policy requires every
+  # action to be pinned to a 40-character commit SHA, and no Dart or Flutter
+  # action is pinned anywhere in this org yet, so adding one here would be a
+  # guess. Until a reviewed pin exists, the Dart sibling is gated locally and by
+  # the runner lane:
+  #
+  #   .ores-lint/lint.sh dart       # dart pub get && dart analyze --fatal-infos && dart test

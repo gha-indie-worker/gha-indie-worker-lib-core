@@ -2,3 +2,11 @@ name = "gha-indie-worker-lib-core"
 kind = "lib-core"
 version = "0.1.0"
 
+org = "gha-indie-worker"
+language = "rust"
+
+[dependencies]
+"gha-indie-worker/gha-indie-worker-interfaces" = "^0.1.0"
+"oresoftware/ores-locks-and-leases" = "^0.1.0"
+"oresoftware/k8s-libs-and-shared-defs" = "^0.1.0"
+"declarative-migrations/declarative-migrations" = "^0.1.0"
