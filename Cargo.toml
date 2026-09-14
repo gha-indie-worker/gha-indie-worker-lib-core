@@ -1,28 +1,30 @@
-    [package]
-    rust-version = "1.88"
-    name = "gha-indie-worker-lib-core"
-    version = "0.1.0"
-    edition = "2021"
-    license = "MIT"
-    description = "SeaORM boundary for GHA Indie Worker on PostgreSQL and CockroachDB"
-    repository = "https://github.com/gha-indie-worker/gha-indie-worker-lib-core"
+[package]
+rust-version = "1.88"
+name = "gha-indie-worker-lib-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "SeaORM boundary and shared coordination policy for GHA Indie Worker"
+repository = "https://github.com/gha-indie-worker/gha-indie-worker-lib-core"
 
-    [features]
-    default = ["read-only", "embedded-schemas"]
-    read-only = []
-    read-write = ["read-only"]
-    migrate = ["read-write"]
+[features]
+default = ["read-only", "embedded-schemas"]
+read-only = []
+read-write = ["read-only"]
+migrate = ["read-write"]
 embedded-schemas = ["dep:gha-indie-worker-interfaces"]
 db = ["dep:sea-orm"]
 
-    [dependencies]
-    serde = { version = "1", features = ["derive"] }
-    thiserror = "2"
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
 serde_json = "1"
 gha-indie-worker-interfaces = { git = "https://github.com/gha-indie-worker/gha-indie-worker-interfaces", branch = "main", optional = true }
 sea-orm = { version = "2.0.0", default-features = false, features = ["macros", "runtime-tokio-rustls", "sqlx-postgres", "with-json", "with-uuid", "with-time"], optional = true }
+# Native Rust projection of the zed dependency. This becomes the canonical key
+# and fenced-lease vocabulary; the existing synchronous LockProvider facade is
+# retained temporarily as a compatibility bridge for callers being migrated.
+ores-locks-and-leases = { git = "https://github.com/ORESoftware/ores-locks-and-leases.git", rev = "e752dd983cfc5a5107396d1fb9ac192fa72270b1", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"
-
-
