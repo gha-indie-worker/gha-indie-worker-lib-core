@@ -36,9 +36,16 @@ impl QueueState {
     pub const fn can_transition_to(self, next: Self) -> bool {
         matches!(
             (self, next),
-            (Self::Queued, Self::Claimed | Self::Cancelled | Self::Expired)
-                | (Self::Claimed, Self::Running | Self::Queued | Self::Cancelled | Self::Expired)
-                | (Self::Running, Self::Succeeded | Self::Failed | Self::Cancelled | Self::Expired)
+            (
+                Self::Queued,
+                Self::Claimed | Self::Cancelled | Self::Expired
+            ) | (
+                Self::Claimed,
+                Self::Running | Self::Queued | Self::Cancelled | Self::Expired
+            ) | (
+                Self::Running,
+                Self::Succeeded | Self::Failed | Self::Cancelled | Self::Expired
+            )
         )
     }
 }
