@@ -1,0 +1,36 @@
+name: Core contract baseline
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/core-contract-baseline.yml"
+      - "contracts/**"
+      - "schema/**"
+      - "typespec/**"
+      - "proto/**"
+      - "wit/**"
+      - "dafny/**"
+      - ".zpkg.toml"
+      - ".zpkg.lock"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/core-contract-baseline.yml"
+      - "contracts/**"
+      - "schema/**"
+      - "typespec/**"
+      - "proto/**"
+      - "wit/**"
+      - "dafny/**"
+      - ".zpkg.toml"
+      - ".zpkg.lock"
+  schedule:
+    - cron: "17 6 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core-contract-baseline:
+    uses: ORESoftware/typespec-json-schema-validator/.github/workflows/core-contract-baseline-reusable.yml@09cbc9418b4ad76bcca79d248e8f4a9756577070
