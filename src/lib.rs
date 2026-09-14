@@ -11,9 +11,9 @@ pub mod flavor;
 pub mod locks;
 pub mod onboarding;
 pub mod protocol;
-pub mod queue;
 #[cfg(feature = "db")]
 pub mod query;
+pub mod queue;
 pub mod runtime;
 pub mod runtime_config;
 pub mod schema;
