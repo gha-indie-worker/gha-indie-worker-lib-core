@@ -41,6 +41,8 @@ mod tests {
         let a = job_execution("job-7", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         let b = job_execution("job-7", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
         assert_ne!(a, b);
-        assert!(a.as_str().starts_with("gha-indie-worker/jobs/execute:job-7:"));
+        assert!(a
+            .as_str()
+            .starts_with("gha-indie-worker/jobs/execute:job-7:"));
     }
 }
