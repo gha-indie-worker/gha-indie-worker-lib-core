@@ -8,6 +8,7 @@ pub mod connection;
 pub mod contracts;
 pub mod error;
 pub mod flavor;
+pub mod lock_keys;
 pub mod locks;
 pub mod onboarding;
 pub mod protocol;
