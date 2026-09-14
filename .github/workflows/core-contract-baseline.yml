@@ -33,4 +33,4 @@ permissions:
 
 jobs:
   core-contract-baseline:
-    uses: ORESoftware/typespec-json-schema-validator/.github/workflows/core-contract-baseline-reusable.yml@5c22eeaf98a6948be5db015ca3c0c18eca4b8147
+    uses: ORESoftware/typespec-json-schema-validator/.github/workflows/core-contract-baseline-reusable.yml@09cbc9418b4ad76bcca79d248e8f4a9756577070
