@@ -11,6 +11,7 @@ pub mod flavor;
 pub mod locks;
 pub mod onboarding;
 pub mod protocol;
+pub mod queue;
 #[cfg(feature = "db")]
 pub mod query;
 pub mod runtime;
@@ -26,4 +27,9 @@ pub use config::CoreConfig;
 pub use connection::CorePool;
 pub use error::CoreError;
 pub use flavor::DatabaseFlavor;
+pub use queue::{
+    check_eligibility, compare_candidates, effective_priority, select_next, EligibilityError,
+    JobRequirements, LeaseAuthority, QueueCandidate, QueueState, SchedulingPolicy, TrustTier,
+    WorkerSnapshot,
+};
 pub use schema::SCHEMA_REVISION;
