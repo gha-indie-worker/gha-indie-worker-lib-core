@@ -1,8 +1,8 @@
-name = "gha-indie-worker-lib-core"
-kind = "lib-core"
-version = "0.1.0"
-
+[package]
 org = "gha-indie-worker"
+name = "gha-indie-worker-lib-core"
+version = "0.1.0"
+kind = "lib"
 language = "rust"
 
 [dependencies]
