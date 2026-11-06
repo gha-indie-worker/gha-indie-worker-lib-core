@@ -16,6 +16,7 @@
 //! | `type` | `object`, `array`, `string`, `integer`, `number`, `boolean`, `null`; a list means "any of" |
 //! | `required`, `properties` | |
 //! | `additionalProperties` | `false`, or a schema applied to every unlisted property |
+//! | `unevaluatedProperties` | `false` only where `additionalProperties: false` already closes an object's declared properties; otherwise rejected |
 //! | `enum`, `const` | |
 //! | `items`, `minItems`, `maxItems` | |
 //! | `minLength`, `maxLength` | counted in Unicode scalar values, like JSON Schema |
@@ -92,12 +93,13 @@ const ANNOTATIONS: [&str; 9] = [
     "$defs",
 ];
 
-const KEYWORDS: [&str; 17] = [
+const KEYWORDS: [&str; 18] = [
     "$ref",
     "type",
     "required",
     "properties",
     "additionalProperties",
+    "unevaluatedProperties",
     "enum",
     "const",
     "items",
@@ -255,6 +257,24 @@ fn node(
                 at,
                 "unsupported-keyword",
                 format!("{key} is outside the supported subset"),
+            ));
+        }
+    }
+
+    // In the peer-authored transport schemas, unevaluatedProperties:false
+    // is redundant with additionalProperties:false + a declared properties
+    // map. Admit only this proven-closed subset. Other 2020-12 evaluated-
+    // property semantics (allOf, dynamic refs, etc.) stay fail-closed.
+    if let Some(unevaluated) = map.get("unevaluatedProperties") {
+        let already_sealed = map.get("type").and_then(Value::as_str) == Some("object")
+            && map.get("additionalProperties") == Some(&Value::Bool(false))
+            && map.get("properties").and_then(Value::as_object).is_some()
+            && unevaluated == &Value::Bool(false);
+        if !already_sealed {
+            out.push(Violation::new(
+                at,
+                "unsupported-unevaluated-properties",
+                "unevaluatedProperties requires an explicitly sealed object in this validator",
             ));
         }
     }
@@ -527,10 +547,30 @@ fn digits(text: &str, count: usize) -> bool {
 
 fn is_date(text: &str) -> bool {
     let mut parts = text.split('-');
-    matches!(
-        (parts.next(), parts.next(), parts.next(), parts.next()),
-        (Some(y), Some(m), Some(d), None) if digits(y, 4) && digits(m, 2) && digits(d, 2)
-    )
+    let (Some(y), Some(m), Some(d), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    if !digits(y, 4) || !digits(m, 2) || !digits(d, 2) {
+        return false;
+    }
+    let (Ok(year), Ok(month), Ok(day)) = (y.parse::<u16>(), m.parse::<u8>(), d.parse::<u8>())
+    else {
+        return false;
+    };
+    if year == 0 {
+        return false;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=max_day).contains(&day)
 }
 
 fn is_time_offset(text: &str) -> bool {
@@ -543,7 +583,10 @@ fn is_time_offset(text: &str) -> bool {
     let mut parts = rest.split(':');
     matches!(
         (parts.next(), parts.next(), parts.next()),
-        (Some(h), Some(m), None) if digits(h, 2) && digits(m, 2)
+        (Some(h), Some(m), None)
+            if digits(h, 2) && digits(m, 2)
+                && h.parse::<u8>().is_ok_and(|hour| hour <= 23)
+                && m.parse::<u8>().is_ok_and(|minute| minute <= 59)
     )
 }
 
@@ -573,7 +616,11 @@ fn is_date_time(text: &str) -> bool {
     let mut parts = hms.split(':');
     let ok = matches!(
         (parts.next(), parts.next(), parts.next(), parts.next()),
-        (Some(h), Some(m), Some(s), None) if digits(h, 2) && digits(m, 2) && digits(s, 2)
+        (Some(h), Some(m), Some(s), None)
+            if digits(h, 2) && digits(m, 2) && digits(s, 2)
+                && h.parse::<u8>().is_ok_and(|hour| hour <= 23)
+                && m.parse::<u8>().is_ok_and(|minute| minute <= 59)
+                && s.parse::<u8>().is_ok_and(|second| second <= 59)
     );
     ok && is_time_offset(offset)
 }
@@ -710,6 +757,45 @@ mod tests {
     }
 
     #[test]
+    fn redundant_unevaluated_properties_is_safe_for_explicitly_sealed_objects() {
+        let schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "unevaluatedProperties": false,
+            "properties": {
+                "kind": { "type": "string" },
+                "runId": { "type": "string" }
+            },
+            "required": ["kind"],
+            "oneOf": [
+                { "properties": { "kind": { "const": "subscribe" } }, "required": ["runId"] },
+                { "properties": { "kind": { "const": "heartbeat" } } }
+            ]
+        });
+        assert!(validate(&schema, &json!({ "kind": "subscribe", "runId": "r1" })).is_ok());
+        assert!(validate(&schema, &json!({ "kind": "heartbeat" })).is_ok());
+        assert!(rules(validate(&schema, &json!({ "kind": "subscribe" }))).contains(&"one-of"));
+        assert!(rules(validate(
+            &schema,
+            &json!({ "kind": "heartbeat", "unexpected": true })
+        ))
+        .contains(&"additional-properties"));
+    }
+
+    #[test]
+    fn unevaluated_properties_without_explicit_object_closure_fails_closed() {
+        for schema in [
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "unevaluatedProperties": false }),
+            json!({ "type": "object", "additionalProperties": true, "properties": {}, "unevaluatedProperties": false }),
+            json!({ "type": "object", "additionalProperties": false, "properties": {}, "unevaluatedProperties": true }),
+            json!({ "type": "object", "additionalProperties": false, "properties": {}, "unevaluatedProperties": { "type": "string" } }),
+        ] {
+            assert!(rules(validate(&schema, &json!({})))
+                .contains(&"unsupported-unevaluated-properties"));
+        }
+    }
+
+    #[test]
     fn one_of_selects_exactly_one_branch() {
         let schema = json!({
             "type": "object",
@@ -733,6 +819,50 @@ mod tests {
         assert!(validate(&json!({ "type": "integer" }), &json!(3.5)).is_err());
         assert!(validate(&json!({ "type": "number" }), &json!(3)).is_ok());
         assert!(validate(&json!({ "type": "number" }), &json!(3.5)).is_ok());
+    }
+
+    #[test]
+    fn date_and_timestamp_formats_reject_calendar_and_clock_overflow() {
+        let date = json!({ "type": "string", "format": "date" });
+        for valid in ["2024-02-29", "2000-02-29", "2026-04-30", "2026-12-31"] {
+            assert!(validate(&date, &json!(valid)).is_ok(), "{valid}");
+        }
+        for invalid in [
+            "0000-01-01",
+            "2025-02-29",
+            "1900-02-29",
+            "2026-02-30",
+            "2026-04-31",
+            "2026-00-01",
+            "2026-13-01",
+            "2026-01-00",
+        ] {
+            assert!(
+                rules(validate(&date, &json!(invalid))).contains(&"format"),
+                "{invalid}"
+            );
+        }
+        let timestamp = json!({ "type": "string", "format": "date-time" });
+        for valid in [
+            "2024-02-29T23:59:59Z",
+            "2026-01-31T00:00:00.1+23:59",
+            "2026-11-06t14:09:00z",
+        ] {
+            assert!(validate(&timestamp, &json!(valid)).is_ok(), "{valid}");
+        }
+        for invalid in [
+            "2025-02-29T12:00:00Z",
+            "2026-01-01T24:00:00Z",
+            "2026-01-01T23:60:00Z",
+            "2026-01-01T23:59:61Z",
+            "2026-01-01T23:59:59+24:00",
+            "2026-01-01T23:59:59-02:60",
+        ] {
+            assert!(
+                rules(validate(&timestamp, &json!(invalid))).contains(&"format"),
+                "{invalid}"
+            );
+        }
     }
 
     #[test]

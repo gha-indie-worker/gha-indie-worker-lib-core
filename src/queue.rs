@@ -197,6 +197,9 @@ impl LeaseAuthority {
     }
 
     pub fn reclaim(self) -> Option<Self> {
+        if self.generation == 0 || self.fencing_token == 0 || self.attempt == 0 {
+            return None;
+        }
         Some(Self {
             generation: self.generation.checked_add(1)?,
             fencing_token: self.fencing_token.checked_add(1)?,
@@ -205,7 +208,10 @@ impl LeaseAuthority {
     }
 
     pub const fn authorizes(self, presented: Self) -> bool {
-        self.generation == presented.generation
+        self.generation > 0
+            && self.fencing_token > 0
+            && self.attempt > 0
+            && self.generation == presented.generation
             && self.fencing_token == presented.fencing_token
             && self.attempt == presented.attempt
     }
@@ -384,6 +390,68 @@ mod tests {
         let second = first.reclaim().expect("lease counters have room");
         assert!(!second.authorizes(first));
         assert!(second.authorizes(second));
+    }
+
+    #[test]
+    fn finite_authority_lattice_rejects_zero_or_stale_fences() {
+        let mut cases = 0;
+        for generation in 0..=2 {
+            for fence in 0..=2 {
+                for attempt in 0..=2 {
+                    let authority = LeaseAuthority {
+                        generation,
+                        fencing_token: fence,
+                        attempt,
+                    };
+                    for observed_generation in 0..=2 {
+                        for observed_fence in 0..=2 {
+                            for observed_attempt in 0..=2 {
+                                let presented = LeaseAuthority {
+                                    generation: observed_generation,
+                                    fencing_token: observed_fence,
+                                    attempt: observed_attempt,
+                                };
+                                let expected = generation > 0
+                                    && fence > 0
+                                    && attempt > 0
+                                    && authority == presented;
+                                assert_eq!(
+                                    authority.authorizes(presented),
+                                    expected,
+                                    "authority={authority:?} presented={presented:?}"
+                                );
+                                cases += 1;
+                            }
+                        }
+                    }
+                    if generation == 0 || fence == 0 || attempt == 0 {
+                        assert_eq!(authority.reclaim(), None);
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 729);
+    }
+
+    #[test]
+    fn reclaim_refuses_counter_overflow_without_issuing_new_authority() {
+        let initial = LeaseAuthority::initial();
+        for saturated in [
+            LeaseAuthority {
+                generation: u64::MAX,
+                ..initial
+            },
+            LeaseAuthority {
+                fencing_token: u64::MAX,
+                ..initial
+            },
+            LeaseAuthority {
+                attempt: u32::MAX,
+                ..initial
+            },
+        ] {
+            assert_eq!(saturated.reclaim(), None);
+        }
     }
 
     #[test]
