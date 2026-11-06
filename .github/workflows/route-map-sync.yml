@@ -31,20 +31,31 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: gha-indie-worker/gha-indie-worker-interfaces
+          ref: 669d92ab3b0365f3951f2601e2af27539def34e1
           path: gha-indie-worker-interfaces
           persist-credentials: false
       - name: Check out worker implementation
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: gha-indie-worker/gha-indie-worker.rs
+          ref: ea5579116ebfc581de692f0c59573c69a0808ced
           path: gha-indie-worker.rs
           persist-credentials: false
       - name: Check out clone server
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: gha-indie-worker/gha-clone-server.rs
+          ref: c5ca7f015893dad8691028a213edcc29afbd636f
           path: gha-clone-server.rs
           persist-credentials: false
+      - name: Verify immutable peer revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C gha-indie-worker-interfaces rev-parse HEAD)" = "669d92ab3b0365f3951f2601e2af27539def34e1"
+          test "$(git -C gha-indie-worker.rs rev-parse HEAD)" = "ea5579116ebfc581de692f0c59573c69a0808ced"
+          test "$(git -C gha-clone-server.rs rev-parse HEAD)" = "c5ca7f015893dad8691028a213edcc29afbd636f"
+          printf 'checked immutable peer trees for route-map verification\n'
       # The pre-existing checker is standard-library-only; ubuntu-24.04 has
       # python3 available. Avoid a mutable setup-python tag and pip installs.
       - name: Validate the route maps and generated clients
