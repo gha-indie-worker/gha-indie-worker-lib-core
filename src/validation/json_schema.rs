@@ -748,8 +748,11 @@ mod tests {
         assert!(validate(&schema, &json!({ "kind": "subscribe", "runId": "r1" })).is_ok());
         assert!(validate(&schema, &json!({ "kind": "heartbeat" })).is_ok());
         assert!(rules(validate(&schema, &json!({ "kind": "subscribe" }))).contains(&"one-of"));
-        assert!(rules(validate(&schema, &json!({ "kind": "heartbeat", "unexpected": true })))
-            .contains(&"additional-properties"));
+        assert!(rules(validate(
+            &schema,
+            &json!({ "kind": "heartbeat", "unexpected": true })
+        ))
+        .contains(&"additional-properties"));
     }
 
     #[test]
