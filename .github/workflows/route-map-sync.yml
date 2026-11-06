@@ -63,3 +63,65 @@ jobs:
         run: |
           python3 --version
           python3 scripts/check-route-sync.py --root .
+      - name: Emit verified exact-head route-map receipt
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" -ge 1
+          mkdir -p evidence
+          SOURCE_SHA="$(git -C gha-indie-worker-lib-core rev-parse HEAD)"
+          SOURCE_TREE="$(git -C gha-indie-worker-lib-core rev-parse HEAD^{tree})"
+          INTERFACE_SHA="$(git -C gha-indie-worker-interfaces rev-parse HEAD)"
+          INTERFACE_TREE="$(git -C gha-indie-worker-interfaces rev-parse HEAD^{tree})"
+          WORKER_SHA="$(git -C gha-indie-worker.rs rev-parse HEAD)"
+          WORKER_TREE="$(git -C gha-indie-worker.rs rev-parse HEAD^{tree})"
+          CLONE_SHA="$(git -C gha-clone-server.rs rev-parse HEAD)"
+          CLONE_TREE="$(git -C gha-clone-server.rs rev-parse HEAD^{tree})"
+          test "$SOURCE_SHA" = "$EXPECTED_SHA"
+          test "$INTERFACE_SHA" = "669d92ab3b0365f3951f2601e2af27539def34e1"
+          test "$WORKER_SHA" = "ea5579116ebfc581de692f0c59573c69a0808ced"
+          test "$CLONE_SHA" = "c5ca7f015893dad8691028a213edcc29afbd636f"
+          jq -n \
+            --arg schema "atto-route-map-receipt/v1" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg source_sha "$SOURCE_SHA" --arg source_tree "$SOURCE_TREE" \
+            --arg interface_sha "$INTERFACE_SHA" --arg interface_tree "$INTERFACE_TREE" \
+            --arg worker_sha "$WORKER_SHA" --arg worker_tree "$WORKER_TREE" \
+            --arg clone_sha "$CLONE_SHA" --arg clone_tree "$CLONE_TREE" \
+            '{
+              schema: $schema,
+              workflow: "route-map-sync",
+              runId: $run_id,
+              runAttempt: ($run_attempt | tonumber),
+              source: {sha: $source_sha, tree: $source_tree},
+              peers: {
+                interfaces: {sha: $interface_sha, tree: $interface_tree},
+                worker: {sha: $worker_sha, tree: $worker_tree},
+                clone: {sha: $clone_sha, tree: $clone_tree}
+              },
+              executedValidation: {
+                routeMapComparison: true,
+                generatedClientCheck: true,
+                status: "passed"
+              },
+              guestAttoExecution: "NOT_EXECUTED"
+            }' > evidence/route-map-receipt.json
+          jq -e '.schema == "atto-route-map-receipt/v1"
+            and .runAttempt >= 1
+            and .executedValidation.status == "passed"
+            and .source.sha != ""
+            and .source.tree != ""
+            and .peers.interfaces.tree != ""
+            and .peers.worker.tree != ""
+            and .peers.clone.tree != ""
+            and .guestAttoExecution == "NOT_EXECUTED"' evidence/route-map-receipt.json
+      - name: Retain exact-head route-map evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: route-map-receipt-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: evidence/route-map-receipt.json
+          if-no-files-found: error
+          retention-days: 30
