@@ -1,0 +1,22 @@
+// Pure AttoLang source-level projection of lease fencing admission.
+// Authoritative claim and storage operations are NOT implemented here.
+// This file does not constitute guest compiler execution.
+define module lease_fencing as
+  pub fnc authorizes(bool current_generation_positive,
+                     bool current_fence_positive,
+                     bool current_attempt_positive,
+                     bool exact_triple_match): bool {
+    return current_generation_positive &&
+      current_fence_positive &&
+      current_attempt_positive &&
+      exact_triple_match;
+  }
+
+  pub fnc self_check(): bool {
+    return authorizes(true,true,true,true) &&
+      !authorizes(false,true,true,true) &&
+      !authorizes(true,false,true,true) &&
+      !authorizes(true,true,false,true) &&
+      !authorizes(true,true,true,false);
+  }
+end
