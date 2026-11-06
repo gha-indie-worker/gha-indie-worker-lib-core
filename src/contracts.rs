@@ -164,8 +164,8 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn all_ten_slices_are_embedded_and_parse() {
-        assert_eq!(slices().len(), 10);
+    fn all_eleven_slices_are_embedded_and_parse() {
+        assert_eq!(slices().len(), 11);
         for name in slices() {
             let document = document(name).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(document.get("$defs").is_some(), "{name}");
