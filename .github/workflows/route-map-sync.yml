@@ -10,25 +10,45 @@ permissions:
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          path: gha-indie-worker-lib-core
+      - name: Verify exact candidate revision
+        working-directory: gha-indie-worker-lib-core
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      # All peer checkouts remain inside GITHUB_WORKSPACE. The repo's ridl.json
+      # intentionally resolves sibling source/map paths one directory above
+      # its own root; checking peers out here preserves those semantics.
+      - name: Check out independent interfaces
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: gha-indie-worker/gha-indie-worker-interfaces
-          path: ../gha-indie-worker-interfaces
-      - uses: actions/checkout@v4
+          path: gha-indie-worker-interfaces
+          persist-credentials: false
+      - name: Check out worker implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: gha-indie-worker/gha-indie-worker.rs
-          path: ../gha-indie-worker.rs
-      - uses: actions/checkout@v4
+          path: gha-indie-worker.rs
+          persist-credentials: false
+      - name: Check out clone server
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: gha-indie-worker/gha-clone-server.rs
-          path: ../gha-clone-server.rs
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      # No pip install: the checker and generator are standard library only, so
-      # CI and a developer laptop cannot reach different verdicts.
-      - name: Validate the route maps and the generated clients
-        run: python3 scripts/check-route-sync.py --root .
+          path: gha-clone-server.rs
+          persist-credentials: false
+      # The pre-existing checker is standard-library-only; ubuntu-24.04 has
+      # python3 available. Avoid a mutable setup-python tag and pip installs.
+      - name: Validate the route maps and generated clients
+        working-directory: gha-indie-worker-lib-core
+        run: |
+          python3 --version
+          python3 scripts/check-route-sync.py --root .
