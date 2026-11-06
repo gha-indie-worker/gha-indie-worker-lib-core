@@ -16,6 +16,7 @@
 //! | `type` | `object`, `array`, `string`, `integer`, `number`, `boolean`, `null`; a list means "any of" |
 //! | `required`, `properties` | |
 //! | `additionalProperties` | `false`, or a schema applied to every unlisted property |
+//! | `unevaluatedProperties` | `false` only where `additionalProperties: false` already closes an object's declared properties; otherwise rejected |
 //! | `enum`, `const` | |
 //! | `items`, `minItems`, `maxItems` | |
 //! | `minLength`, `maxLength` | counted in Unicode scalar values, like JSON Schema |
@@ -92,12 +93,13 @@ const ANNOTATIONS: [&str; 9] = [
     "$defs",
 ];
 
-const KEYWORDS: [&str; 17] = [
+const KEYWORDS: [&str; 18] = [
     "$ref",
     "type",
     "required",
     "properties",
     "additionalProperties",
+    "unevaluatedProperties",
     "enum",
     "const",
     "items",
@@ -255,6 +257,24 @@ fn node(
                 at,
                 "unsupported-keyword",
                 format!("{key} is outside the supported subset"),
+            ));
+        }
+    }
+
+    // In the peer-authored transport schemas, unevaluatedProperties:false
+    // is redundant with additionalProperties:false + a declared properties
+    // map. Admit only this proven-closed subset. Other 2020-12 evaluated-
+    // property semantics (allOf, dynamic refs, etc.) stay fail-closed.
+    if let Some(unevaluated) = map.get("unevaluatedProperties") {
+        let already_sealed = map.get("type").and_then(Value::as_str) == Some("object")
+            && map.get("additionalProperties") == Some(&Value::Bool(false))
+            && map.get("properties").and_then(Value::as_object).is_some()
+            && unevaluated == &Value::Bool(false);
+        if !already_sealed {
+            out.push(Violation::new(
+                at,
+                "unsupported-unevaluated-properties",
+                "unevaluatedProperties requires an explicitly sealed object in this validator",
             ));
         }
     }
@@ -707,6 +727,42 @@ mod tests {
             rules(validate(&schema, &json!("hi"))),
             vec!["unsupported-keyword"]
         );
+    }
+
+    #[test]
+    fn redundant_unevaluated_properties_is_safe_for_explicitly_sealed_objects() {
+        let schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "unevaluatedProperties": false,
+            "properties": {
+                "kind": { "type": "string" },
+                "runId": { "type": "string" }
+            },
+            "required": ["kind"],
+            "oneOf": [
+                { "properties": { "kind": { "const": "subscribe" } }, "required": ["runId"] },
+                { "properties": { "kind": { "const": "heartbeat" } } }
+            ]
+        });
+        assert!(validate(&schema, &json!({ "kind": "subscribe", "runId": "r1" })).is_ok());
+        assert!(validate(&schema, &json!({ "kind": "heartbeat" })).is_ok());
+        assert!(rules(validate(&schema, &json!({ "kind": "subscribe" }))).contains(&"one-of"));
+        assert!(rules(validate(&schema, &json!({ "kind": "heartbeat", "unexpected": true })))
+            .contains(&"additional-properties"));
+    }
+
+    #[test]
+    fn unevaluated_properties_without_explicit_object_closure_fails_closed() {
+        for schema in [
+            json!({ "type": "object", "properties": { "id": { "type": "string" } }, "unevaluatedProperties": false }),
+            json!({ "type": "object", "additionalProperties": true, "properties": {}, "unevaluatedProperties": false }),
+            json!({ "type": "object", "additionalProperties": false, "properties": {}, "unevaluatedProperties": true }),
+            json!({ "type": "object", "additionalProperties": false, "properties": {}, "unevaluatedProperties": { "type": "string" } }),
+        ] {
+            assert!(rules(validate(&schema, &json!({})))
+                .contains(&"unsupported-unevaluated-properties"));
+        }
     }
 
     #[test]
