@@ -837,7 +837,10 @@ mod tests {
             "2026-13-01",
             "2026-01-00",
         ] {
-            assert!(rules(validate(&date, &json!(invalid))).contains(&"format"), "{invalid}");
+            assert!(
+                rules(validate(&date, &json!(invalid))).contains(&"format"),
+                "{invalid}"
+            );
         }
         let timestamp = json!({ "type": "string", "format": "date-time" });
         for valid in [
@@ -855,7 +858,10 @@ mod tests {
             "2026-01-01T23:59:59+24:00",
             "2026-01-01T23:59:59-02:60",
         ] {
-            assert!(rules(validate(&timestamp, &json!(invalid))).contains(&"format"), "{invalid}");
+            assert!(
+                rules(validate(&timestamp, &json!(invalid))).contains(&"format"),
+                "{invalid}"
+            );
         }
     }
 
